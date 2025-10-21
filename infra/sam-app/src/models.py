@@ -33,6 +33,8 @@ class Finding:
     remediation_action: str = ""
     references: List[str] = field(default_factory=list)
     checked_at: datetime = field(default_factory=datetime.utcnow)
+    waived: bool = False
+    waiver: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.severity not in SEVERITIES:
@@ -74,6 +76,7 @@ class Summary:
     PASS: int = 0
     FAIL: int = 0
     WARN: int = 0
+    WAIVED: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

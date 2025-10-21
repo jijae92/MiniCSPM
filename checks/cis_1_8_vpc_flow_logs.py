@@ -6,6 +6,11 @@ from typing import Any, Dict, List
 
 from settings import Settings
 
+META = {
+    "cis": "1.8",
+    "version": ['v1_5']
+}
+
 
 def run(*, settings: Settings, clients: Dict[str, Any]) -> List[Dict[str, Any]]:  # pragma: no cover - TODO implement
     """TODO: Implement cis_1_8_vpc_flow_logs check.

@@ -56,6 +56,7 @@ def _build_clients(settings: Settings) -> Dict[str, Any]:
         "ec2": boto3.client("ec2", **client_kwargs),
         "s3": boto3.client("s3control", **client_kwargs),
         "cloudwatch": boto3.client("cloudwatch", **client_kwargs),
+        "securityhub": boto3.client("securityhub", **client_kwargs),
     }
     # Provide alias for callers expecting explicit s3control key.
     clients["s3control"] = clients["s3"]
@@ -89,6 +90,7 @@ def lambda_handler(event: Dict[str, Any], _: Any) -> Dict[str, Any]:
         result = engine.run_all_checks(context=context, clients=clients, includes=includes)
         engine.persist_result(result)
         reports = engine.publish_reports(result)
+        engine.export_security_findings(result)
 
         summary = _summarize(result)
         LOGGER.info(

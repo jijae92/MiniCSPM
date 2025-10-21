@@ -9,6 +9,11 @@ from botocore.exceptions import ClientError
 
 from settings import Settings
 
+META = {
+    "cis": "2.1",
+    "version": ['v1_5', 'v5_0']
+}
+
 
 def run(*, settings: Settings, clients: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Verify at least one multi-region CloudTrail is active."""

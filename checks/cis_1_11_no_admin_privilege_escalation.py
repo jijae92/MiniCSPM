@@ -6,6 +6,11 @@ from typing import Any, Dict, List
 
 from settings import Settings
 
+META = {
+    "cis": "1.11",
+    "version": ['v1_5']
+}
+
 
 def run(*, settings: Settings, clients: Dict[str, Any]) -> List[Dict[str, Any]]:  # pragma: no cover - TODO implement
     """TODO: Implement cis_1_11_no_admin_privilege_escalation check.

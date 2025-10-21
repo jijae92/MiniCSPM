@@ -9,6 +9,11 @@ from botocore.exceptions import ClientError
 
 from settings import Settings
 
+META = {
+    "cis": "5.1",
+    "version": ['v1_5', 'v5_0']
+}
+
 PAB_FLAGS = (
     "BlockPublicAcls",
     "IgnorePublicAcls",

@@ -130,8 +130,8 @@ def _enable_account_pab(
             AccountId=account_id,
             PublicAccessBlockConfiguration=config,
         )
-        return f"Enabled account-level S3 public access block for {account_id}"
-    return f"Would enable account-level S3 public access block for {account_id}"
+        return f"Enabled account-level S3 public access block for {_mask(account_id)}"
+    return f"Would enable account-level S3 public access block for {_mask(account_id)}"
 
 
 @register("set_strong_password_policy")
@@ -187,8 +187,10 @@ def _revoke_sg_open_admin_ports(
                         }
                     ],
                 )
-        return f"Revoked open admin ports {ports} for {', '.join(targets)}"
-    return f"Would revoke open admin ports {ports} for {', '.join(targets)}"
+        masked_targets = ', '.join(_mask(t) for t in targets)
+        return f"Revoked open admin ports {ports} for {masked_targets}"
+    masked_targets = ', '.join(_mask(t) for t in targets)
+    return f"Would revoke open admin ports {ports} for {masked_targets}"
 
 
 @register("create_metric_filter_alarm_unauth")

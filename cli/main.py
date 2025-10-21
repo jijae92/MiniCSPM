@@ -24,7 +24,10 @@ EXIT_SUCCESS = 0
 EXIT_FAILURE = 2
 
 
-def build_local_settings(auto_remediate: Optional[int] = None) -> Settings:
+def build_local_settings(
+    auto_remediate: Optional[int] = None,
+    cis_version: Optional[str] = None,
+) -> Settings:
     """Create settings from env with sensible defaults for local runs."""
     defaults = {
         "TABLE_NAME": os.environ.get("TABLE_NAME", "MiniCspmResults"),
@@ -39,6 +42,10 @@ def build_local_settings(auto_remediate: Optional[int] = None) -> Settings:
     defaults["AUTO_REMEDIATE"] = str(auto_remediate) if auto_remediate is not None else os.environ.get(
         "AUTO_REMEDIATE", "0"
     )
+    if cis_version is not None:
+        defaults["CIS_VERSION"] = cis_version
+    else:
+        defaults.setdefault("CIS_VERSION", os.environ.get("CIS_VERSION", "v1_5"))
     os.environ.update(defaults)
     return load_settings()
 
@@ -55,9 +62,10 @@ def run_scan(
     fmt: str,
     auto_remediate: Optional[int],
     includes: Optional[Sequence[str]] = None,
+    cis_version: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute checks and render a local artifact."""
-    settings = build_local_settings(auto_remediate=auto_remediate)
+    settings = build_local_settings(auto_remediate=auto_remediate, cis_version=cis_version)
     engine = Engine(settings=settings)
     context = ExecutionContext(
         account_id=settings.account_id or "000000000000",
@@ -123,6 +131,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     scan.add_argument("--format", "-f", choices=["csv", "json"], default="csv")
     scan.add_argument("--out", "-o", type=Path)
     scan.add_argument("--auto-remediate", type=int, choices=[0, 1, 2], dest="auto_remediate", default=None)
+    scan.add_argument("--cis", choices=["v1_5", "v5_0"], dest="cis_version", default=None)
     scan.add_argument(
         "--includes",
         type=str,
@@ -145,7 +154,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fmt = args.format
             output_path = args.out or Path(f"mini-cspm-report.{fmt}")
             includes = _parse_includes(getattr(args, "includes", None))
-            run_scan(output_path=output_path, fmt=fmt, auto_remediate=args.auto_remediate, includes=includes)
+            run_scan(
+                output_path=output_path,
+                fmt=fmt,
+                auto_remediate=args.auto_remediate,
+                includes=includes,
+                cis_version=args.cis_version,
+            )
         elif args.command == "score":
             _print_score(args.from_path)
         elif args.command == "findings":

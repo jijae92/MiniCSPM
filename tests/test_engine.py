@@ -29,6 +29,7 @@ def make_settings() -> Settings:
         event_bus_name="mini-cspm-bus",
         remediation_apply_env_enabled=True,
         remediation_apply_parameter="/mini-cspm/demo-apply",
+        cis_version="v1_5",
     )
 
 
@@ -104,6 +105,7 @@ def test_alert_emission_thresholds(monkeypatch):
     )
     clients = _fake_clients()
     result = engine.run_all_checks(context=context, clients=clients)
+    monkeypatch.setattr(engine, "_write_csv_report", lambda result: ("reports/test.csv", None))
     with pytest.raises(RuntimeError):
         engine.publish_reports(result)
 

@@ -23,6 +23,9 @@ class _FakeEngine:
         self.published = result
         return {"csv": {"bucket": "reports", "key": "k.csv", "url": "https://example.com/k.csv"}}
 
+    def export_security_findings(self, result):
+        self.exported = result
+
 
 def _build_result(account_id: str) -> ExecutionResult:
     timestamp = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)

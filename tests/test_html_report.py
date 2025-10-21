@@ -25,12 +25,21 @@ def _result_with_failures() -> ExecutionResult:
                         "applied": True,
                         "message": "Enabled account-level S3 block public access",
                     }
-                ]
+                ],
             },
             remediable=True,
             remediation_action="enable_account_pab",
             references=[],
             checked_at=timestamp,
+            waived=True,
+            waiver={
+                "control_id": "CIS-1.1",
+                "resource_id": "123456789012",
+                "reason": "Pending remediation",
+                "owner": "security-team",
+                "createdAt": timestamp.isoformat(),
+                "expiresAt": (timestamp.replace(year=timestamp.year + 1)).isoformat(),
+            },
         ),
         Finding(
             id="CIS-1.2",
@@ -48,7 +57,7 @@ def _result_with_failures() -> ExecutionResult:
         ),
     ]
     score = Score(total=2, passed=1, failed=1, warned=0, weighted=50)
-    summary = Summary(HIGH=1, MEDIUM=0, LOW=0, PASS=1, FAIL=1, WARN=0)
+    summary = Summary(HIGH=1, MEDIUM=0, LOW=0, PASS=1, FAIL=1, WARN=0, WAIVED=1)
     return ExecutionResult(
         account_id="123456789012",
         region="us-east-1",
@@ -79,6 +88,8 @@ def test_render_html_contains_top_failures_and_remediation():
     assert "Root account MFA enabled" in html_body
     assert "Auto Remediation Summary" in html_body
     assert "enable_account_pab" in html_body
+    assert "Exception Allowlist" in html_body
+    assert "Pending remediation" in html_body
 
 
 def test_write_html_uploads_to_s3(monkeypatch):

@@ -6,6 +6,11 @@ from typing import Any, Dict, List
 
 from settings import Settings
 
+META = {
+    "cis": "2.4",
+    "version": ['v5_0']
+}
+
 
 def run(*, settings: Settings, clients: Dict[str, Any]) -> List[Dict[str, Any]]:  # pragma: no cover - TODO implement
     """TODO: Implement cis_2_4_cloudtrail_bucket_logging check.

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import csv
-import importlib
-import io
-import json
 import logging
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -15,37 +11,56 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from botocore.exceptions import ClientError
 
-from checks import CHECK_REGISTRY
+import json
+
+from checks.registry import CONTROL_REGISTRY
 from models import ExecutionContext, ExecutionResult, Finding, Score, Summary
 from settings import Settings
+from asff import finding_to_asff
+from allowlist import load_allowlist
 import ddb
 import html_report
 import pdf_report
 import remediation
+import csv_report
+import s3io
 import boto3
 
 logger = logging.getLogger(__name__)
 
+
+DEFAULT_VERSION_BASELINES = {
+    "v1_5": [
+        "CIS-1.1",
+        "CIS-1.2",
+        "CIS-1.5",
+        "CIS-1.22",
+        "CIS-2.1",
+        "CIS-2.2",
+        "CIS-2.3",
+        "CIS-3.1",
+        "CIS-4.1",
+        "CIS-5.1",
+    ],
+    "v5_0": [
+        "CIS-1.1",
+        "CIS-1.2",
+        "CIS-1.5",
+        "CIS-1.14",
+        "CIS-1.18",
+        "CIS-1.22",
+        "CIS-2.1",
+        "CIS-2.4",
+        "CIS-3.1",
+        "CIS-5.1",
+    ],
+}
 
 def _mask_identifier(value: str) -> str:
     if not value:
         return "***"
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
     return f"{value[:2]}***{digest}"
-
-
-DEFAULT_CHECK_IDS = [
-    "CIS-1.1",
-    "CIS-1.2",
-    "CIS-1.5",
-    "CIS-1.22",
-    "CIS-2.1",
-    "CIS-2.2",
-    "CIS-2.3",
-    "CIS-3.1",
-    "CIS-4.1",
-    "CIS-5.1",
-]
 
 
 @dataclass
@@ -67,14 +82,19 @@ class Engine:
         s3_client: Optional[object] = None,
         events_client: Optional[object] = None,
         ssm_client: Optional[object] = None,
+        securityhub_client: Optional[object] = None,
         executor_cls=ThreadPoolExecutor,
     ) -> None:
         self.settings = settings
-        self._check_registry = dict(CHECK_REGISTRY)
-        self._module_cache: Dict[str, object] = {}
-        for check_id, runner in self._check_registry.items():
-            module_name = runner.__module__
-            self._module_cache[check_id] = importlib.import_module(module_name)
+        version_registry = CONTROL_REGISTRY.get(settings.cis_version)
+        if not version_registry:
+            raise ValueError(f"Unsupported CIS version: {settings.cis_version}")
+        self._control_modules: Dict[str, object] = dict(version_registry)
+        baseline = DEFAULT_VERSION_BASELINES.get(settings.cis_version)
+        if baseline:
+            self._default_check_ids = [cid for cid in baseline if cid in self._control_modules]
+        else:
+            self._default_check_ids = list(self._control_modules.keys())
         if s3_client is None:
             self._s3_client = boto3.client("s3")
         else:
@@ -87,6 +107,11 @@ class Engine:
             self._ssm_client = boto3.client("ssm")
         else:
             self._ssm_client = ssm_client
+        if securityhub_client is None:
+            self._securityhub_client = boto3.client("securityhub")
+        else:
+            self._securityhub_client = securityhub_client
+        self._allowlist = load_allowlist()
         self._apply_guard_result: Optional[bool] = None
         self._executor_cls = executor_cls
 
@@ -117,6 +142,7 @@ class Engine:
         result = self.run_all_checks(context=context, clients=clients, includes=includes)
         self.persist_result(result)
         reports = self.publish_reports(result)
+        self.export_security_findings(result)
         payload = result.to_dict()
         payload["reports"] = reports
         return payload
@@ -132,6 +158,7 @@ class Engine:
         check_ids = self._resolve_check_ids(includes)
         outcomes = self._execute_checks(check_ids=check_ids, context=context, clients=client_pool)
         findings: List[Finding] = [finding for outcome in outcomes for finding in outcome.findings]
+        self._apply_allowances(findings)
         if self.settings.auto_remediate > 0:
             self._run_remediations(findings, client_pool)
 
@@ -150,7 +177,7 @@ class Engine:
     def persist_result(self, result: ExecutionResult) -> None:
         """Persist the execution outcome in DynamoDB and update latest flags."""
         if result.account_id:
-            ddb.clear_latest_flag(account_id=result.account_id)
+            ddb.clear_latest_flag(account_id=result.account_id, region=result.region)
         ddb.put_execution_result(result)
 
     def publish_reports(self, result: ExecutionResult) -> Dict[str, Optional[str]]:
@@ -173,19 +200,64 @@ class Engine:
             }
         }
 
+    def export_security_findings(self, result: ExecutionResult) -> None:
+        """Export FAIL findings to AWS Security Hub if enabled."""
+        if not self.settings.export_to_security_hub:
+            return
+        product_arn = self.settings.product_arn
+        if not product_arn:
+            logger.warning("Security Hub export is enabled but PRODUCT_ARN is missing; skipping export")
+            return
+        failed_findings = [
+            finding for finding in result.findings if finding.status == "FAIL" and not getattr(finding, "waived", False)
+        ]
+        if not failed_findings:
+            return
+
+        batches: List[List[Finding]] = []
+        chunk: List[Finding] = []
+        for finding in failed_findings:
+            chunk.append(finding)
+            if len(chunk) == 100:
+                batches.append(chunk)
+                chunk = []
+        if chunk:
+            batches.append(chunk)
+
+        for batch in batches:
+            payload = [
+                finding_to_asff(
+                    finding=finding,
+                    account_id=result.account_id,
+                    region=result.region,
+                    product_arn=product_arn,
+                    cis_version=self.settings.cis_version,
+                )
+                for finding in batch
+            ]
+            try:
+                response = self._securityhub_client.batch_import_findings(Findings=payload)
+                failed = response.get("FailedCount", 0)
+                if failed:
+                    logger.warning("Security Hub import reported %s failed findings", failed)
+            except ClientError as exc:
+                logger.error("Security Hub batch import failed: %s", exc.response.get("Error", {}).get("Message", exc))
+                logger.debug("Security Hub import failure detail", exc_info=exc)
+                break
+
     def _resolve_check_ids(self, includes: Optional[Sequence[str]]) -> List[str]:
         if includes:
             resolved: List[str] = []
             for item in includes:
                 check_id = item.strip().upper()
-                if check_id in self._check_registry:
+                if check_id in self._control_modules:
                     resolved.append(check_id)
                 else:
                     logger.warning("Ignoring unknown check id: %s", item)
             if resolved:
                 return resolved
             logger.warning("No valid check ids resolved from includes; falling back to defaults")
-        return [check_id for check_id in DEFAULT_CHECK_IDS if check_id in self._check_registry]
+        return list(self._default_check_ids)
 
     def _execute_checks(
         self,
@@ -228,8 +300,8 @@ class Engine:
         context: ExecutionContext,
         clients: Dict[str, object],
     ) -> CheckOutcome:
-        runner = self._check_registry[check_id]
-        module = self._module_cache[check_id]
+        module = self._control_modules[check_id]
+        runner = getattr(module, "run")
         try:
             raw = runner(settings=self.settings, clients=clients)
         except Exception as exc:  # pragma: no cover - reported via WARN finding
@@ -242,25 +314,29 @@ class Engine:
         return CheckOutcome(name=check_id, findings=findings, status=status)
 
     def _error_outcome(self, check_id: str, context: ExecutionContext, exc: Exception) -> CheckOutcome:
-        module = self._module_cache.get(check_id)
+        module = self._control_modules.get(check_id)
         finding = self._fallback_finding(check_id, module, context, f"exception: {exc}")
         return CheckOutcome(name=check_id, findings=[finding], status="WARN")
 
     def _timeout_outcome(self, check_id: str, context: ExecutionContext) -> CheckOutcome:
-        module = self._module_cache.get(check_id)
+        module = self._control_modules.get(check_id)
         finding = self._fallback_finding(check_id, module, context, "timeout")
         return CheckOutcome(name=check_id, findings=[finding], status="WARN")
 
     def _fallback_finding(self, check_id: str, module, context: ExecutionContext, note: str) -> Finding:
         module_doc = getattr(module, "__doc__", None) if module else None
-        title = (module_doc or check_id).strip().splitlines()[0]
-        control_id = getattr(module, "CONTROL_ID", check_id)
+        meta = getattr(module, "META", {}) if module else {}
+        title = meta.get("title") or (module_doc or check_id).strip().splitlines()[0]
+        control_id = meta.get("control_id", getattr(module, "CONTROL_ID", check_id))
+        cis_section = meta.get("cis", control_id.replace("CIS-", ""))
+        service = meta.get("service", getattr(module, "SERVICE", "unknown"))
+        severity = meta.get("severity", "MEDIUM")
         return Finding(
             id=control_id,
             title=title,
-            cis=getattr(module, "CIS_SECTION", control_id.replace("CIS-", "")),
-            service=getattr(module, "SERVICE", "unknown"),
-            severity="MEDIUM",
+            cis=cis_section,
+            service=service,
+            severity=severity,
             status="WARN",
             resource_ids=[context.account_id or self.settings.account_id or "unknown"],
             evidence={"note": note},
@@ -278,6 +354,26 @@ class Engine:
             return "WARN"
         return "PASS"
 
+    def _apply_allowances(self, findings: Sequence[Finding]) -> None:
+        if not getattr(self._allowlist, "entries", None):
+            return
+        reference = datetime.now(timezone.utc)
+        for finding in findings:
+            entry = self._allowlist.match(finding, reference)
+            if not entry:
+                continue
+            finding.waived = True
+            waiver_info = entry.to_dict()
+            finding.waiver = waiver_info
+            finding.evidence.setdefault("waiver", waiver_info)
+            finding.evidence["waived"] = True
+            logger.info(
+                "Finding %s for account %s waived until %s",
+                finding.id,
+                _mask_identifier(finding.resource_ids[0] if finding.resource_ids else ""),
+                waiver_info.get("expiresAt", ""),
+            )
+
     def _run_remediations(self, findings: Sequence[Finding], clients: Dict[str, object]) -> None:
         """Run sequential remediations for failing, remediable findings."""
         allow_apply = self._allow_apply()
@@ -288,6 +384,8 @@ class Engine:
                 continue
             action = getattr(finding, "remediation_action", "") or ""
             if not action:
+                continue
+            if getattr(finding, "waived", False):
                 continue
             result = remediation.remediate(
                 action=action,
@@ -420,56 +518,17 @@ class Engine:
                 setattr(summary, finding.severity, getattr(summary, finding.severity) + 1)
             if hasattr(summary, finding.status):
                 setattr(summary, finding.status, getattr(summary, finding.status) + 1)
+            if getattr(finding, "waived", False) and hasattr(summary, "WAIVED"):
+                summary.WAIVED += 1
         return summary
 
     def _write_csv_report(self, result: ExecutionResult) -> Tuple[str, Optional[str]]:
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(
-            [
-                "timestamp",
-                "account_id",
-                "control_id",
-                "title",
-                "severity",
-                "status",
-                "resource_ids",
-                "notes",
-            ]
-        )
-        timestamp_iso = result.timestamp.isoformat()
-        for finding in result.findings:
-            notes = json.dumps(finding.evidence, default=str) if finding.evidence else ""
-            writer.writerow(
-                [
-                    timestamp_iso,
-                    result.account_id,
-                    finding.id,
-                    finding.title,
-                    finding.severity,
-                    finding.status,
-                    ",".join(finding.resource_ids),
-                    notes,
-                ]
-            )
-
-        key = self._build_csv_key(result)
-        body = buffer.getvalue().encode("utf-8")
-        self._s3_client.put_object(
-            Bucket=self.settings.report_bucket,
-            Key=key,
-            Body=body,
-            ContentType="text/csv",
-        )
+        key = csv_report.write_csv(result=result, settings=self.settings)
 
         presigned_url: Optional[str] = None
         if self.settings.enable_presigned_urls:
             try:
-                presigned_url = self._s3_client.generate_presigned_url(
-                    ClientMethod="get_object",
-                    Params={"Bucket": self.settings.report_bucket, "Key": key},
-                    ExpiresIn=self.settings.presign_ttl_seconds,
-                )
+                presigned_url = s3io.presign(key, expires_in=self.settings.presign_ttl_seconds)
             except Exception as exc:  # pragma: no cover - logging only
                 logger.warning("Failed to create presigned URL for %s: %s", key, exc)
 

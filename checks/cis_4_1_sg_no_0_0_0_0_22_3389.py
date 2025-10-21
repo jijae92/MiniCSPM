@@ -9,6 +9,11 @@ from botocore.exceptions import ClientError
 
 from settings import Settings
 
+META = {
+    "cis": "4.1",
+    "version": ['v1_5', 'v5_0']
+}
+
 TARGET_PORTS = {22, 3389}
 OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
 

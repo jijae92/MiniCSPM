@@ -52,25 +52,45 @@ def test_scan_writes_json(tmp_path, monkeypatch):
     captured = {}
 
     class _EngineStub:
+        last_settings = None
+
         def __init__(self, settings):
             self.settings = settings
+            _EngineStub.last_settings = settings
 
         def run_all_checks(self, context, clients=None, includes=None):
             captured["includes"] = includes
             return result
 
-    monkeypatch.setattr(cli_main, "build_local_settings", lambda auto_remediate=None: _settings())
+    def fake_build_local_settings(auto_remediate=None, cis_version=None):
+        settings = _settings()
+        if cis_version:
+            settings.cis_version = cis_version
+        return settings
+
+    monkeypatch.setattr(cli_main, "build_local_settings", fake_build_local_settings)
     monkeypatch.setattr(cli_main, "Engine", _EngineStub)
 
     out_path = tmp_path / "report.json"
     exit_code = cli_main.main(
-        ["scan", "--format", "json", "--out", str(out_path), "--includes", "CIS-1.1,CIS-4.1"]
+        [
+            "scan",
+            "--format",
+            "json",
+            "--out",
+            str(out_path),
+            "--includes",
+            "CIS-1.1,CIS-4.1",
+            "--cis",
+            "v5_0",
+        ]
     )
 
     assert exit_code == EXIT_SUCCESS
     payload = json.loads(out_path.read_text())
     assert payload["findings"][0]["id"] == "CIS-1.1"
     assert captured["includes"] == ["CIS-1.1", "CIS-4.1"]
+    assert _EngineStub.last_settings.cis_version == "v5_0"
 
 
 def test_score_command_prints_summary(tmp_path, capsys):

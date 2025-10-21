@@ -23,7 +23,10 @@ jobs:
           pip install -r requirements.txt
 
       - name: pip-audit security scan
-        run: pip-audit --fail-on vulnerability --severity HIGH
+        run: pip-audit
+
+      - name: Validate allowlist expiry
+        run: python scripts/check_allowlist.py
 
       - name: Run tests with coverage
         run: pytest --cov=infra/sam-app/src --cov-report=term-missing --cov-fail-under=80

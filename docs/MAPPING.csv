@@ -1,11 +1,14 @@
-check_id,cis_control,title,recommended_remediation,service,severity,risk
-CIS-1.1,1.1,Root account MFA enabled,Enable hardware/virtual MFA on the root user,iam,HIGH,Account takeover via compromised root credentials
-CIS-1.2,1.2,No root access keys,Delete existing root access keys and require IAM roles instead,iam,HIGH,Unlimited privilege escalation through key leakage
-CIS-1.5,1.5,Strong password policy,Apply 14+ character password policy with complexity and reuse limits,iam,MEDIUM,Elevated password spraying/successful brute force
-CIS-1.22,1.22,MFA for console users,Enforce MFA enrollment for all console users via IAM policy,iam,HIGH,Phishing and session hijack without second factor
-CIS-2.1,2.1,Multi-region CloudTrail,Configure an organization or multi-region trail and ensure logging is ON,cloudtrail,HIGH,Loss of forensic evidence across regions
-CIS-2.2,2.2,CloudTrail log validation,Enable log file validation on every active trail,cloudtrail,MEDIUM,Manipulated log files go undetected
-CIS-2.3,2.3,CloudTrail encryption,Attach a CMK to encrypt CloudTrail logs,cloudtrail,MEDIUM,Unencrypted audit data exposure
-CIS-3.1,3.1,Unauthorized API alerts,Create metric filter and alarm for AccessDenied/UnauthorizedOperation,logs,MEDIUM,Delayed detection of intrusion attempts
-CIS-4.1,4.1,No open admin ports,Remove 0.0.0.0/0 rules for TCP 22 and 3389,ec2,HIGH,Unrestricted SSH/RDP attacks
-CIS-5.1,5.1,Account-level PAB,Enable all four S3 public access block settings,s3,HIGH,Accidental public bucket exposure
+control_id,service,severity,cis_v1_5,cis_v5_0
+CIS-1.1,iam,HIGH,Root account MFA enabled,Root account MFA enabled
+CIS-1.2,iam,HIGH,Root access keys removed,Root access keys removed
+CIS-1.3,iam,HIGH,Root access key rotation reminder,
+CIS-1.5,iam,MEDIUM,Strong password policy >=14 chars,Strong password policy >=14 chars
+CIS-1.14,iam,MEDIUM,,IAM Access Analyzer enabled
+CIS-1.18,securityhub,HIGH,,GuardDuty & Security Hub enabled
+CIS-1.22,iam,HIGH,Console MFA enforced,Console MFA enforced
+CIS-2.1,cloudtrail,HIGH,Organization/multi-region trail enabled,Organization/multi-region trail enabled
+CIS-2.4,cloudtrail,MEDIUM,,CloudTrail data events logging
+CIS-3.1,logs,MEDIUM,Unauthorized API metric filter,Unauthorized API metric filter
+CIS-3.2,cloudwatch,HIGH,,Root API CloudWatch alarm
+CIS-4.1,ec2,HIGH,Admin ports closed to 0.0.0.0/0,Admin ports closed to 0.0.0.0/0
+CIS-5.1,s3,HIGH,S3 Block Public Access enabled,S3 Block Public Access enabled

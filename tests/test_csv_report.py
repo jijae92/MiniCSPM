@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,10 +64,19 @@ def _make_result() -> ExecutionResult:
     )
 
 
-def test_write_csv_report_matches_contract():
+def test_write_csv_report_matches_contract(monkeypatch):
     fake_s3 = _FakeS3Client()
     settings = _make_settings()
-    engine = Engine(settings=settings, s3_client=fake_s3)
+
+    def fake_put_object(*, key, body, content_type):
+        fake_s3.last_put = {"Bucket": settings.report_bucket, "Key": key, "Body": body, "ContentType": content_type}
+        return key
+
+    monkeypatch.setattr("csv_report.s3io.put_object", fake_put_object)
+    monkeypatch.setattr("csv_report.s3io.build_report_key", lambda prefix, result, ext: "reports/123456789012/20240101T000000Z.csv")
+    monkeypatch.setattr("engine.s3io.presign", lambda key, expires_in=None: f"https://example.com/{key}")
+
+    engine = Engine(settings=settings)
     result = _make_result()
 
     key, url = engine._write_csv_report(result)  # pylint: disable=protected-access
@@ -89,16 +97,18 @@ def test_write_csv_report_matches_contract():
     assert rows == expected_rows
 
     assert rows[0] == [
-        "timestamp",
-        "account_id",
-        "control_id",
+        "finding_id",
         "title",
+        "cis",
+        "service",
         "severity",
         "status",
         "resource_ids",
-        "notes",
+        "remediable",
+        "remediation_action",
+        "checked_at",
+        "waived",
     ]
-    assert rows[1][0] == result.timestamp.isoformat()
-    assert rows[1][1] == "123456789012"
-    assert rows[1][2] == "CIS-1.1"
-    assert json.loads(rows[1][7]) == {"mfa_enabled": False}
+    assert rows[1][0] == "CIS-1.1"
+    assert rows[1][5] == "FAIL"
+    assert rows[1][-1] == "no"

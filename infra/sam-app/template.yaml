@@ -44,6 +44,19 @@ Parameters:
     Type: String
     Default: reports/pdf/
     Description: S3 prefix for PDF reports.
+  CisVersion:
+    Type: String
+    Default: v1_5
+    AllowedValues: [v1_5, v5_0]
+    Description: CIS benchmark version to execute.
+  RetainDaysS3:
+    Type: Number
+    Default: 365
+    Description: Number of days to retain S3 report objects.
+  RetainDaysDdb:
+    Type: Number
+    Default: 365
+    Description: Number of days to retain DynamoDB execution rows.
   RemediationApplyParameter:
     Type: String
     Default: mini-cspm/remediation-apply
@@ -67,6 +80,9 @@ Globals:
         PDF_PREFIX: !Ref PdfPrefix
         AUTO_REMEDIATE_APPLY: 'false'
         REMEDIATION_APPLY_PARAMETER: !Ref RemediationApplyParameter
+        CIS_VERSION: !Ref CisVersion
+        RETAIN_DAYS_S3: !Ref RetainDaysS3
+        RETAIN_DAYS_DDB: !Ref RetainDaysDdb
     Policies:
       - AWSLambdaBasicExecutionRole
 
@@ -77,15 +93,18 @@ Resources:
       TableName: !Ref ResultsTableName
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: account_id
+        - AttributeName: pk
           AttributeType: S
-        - AttributeName: ts
+        - AttributeName: sk
           AttributeType: S
       KeySchema:
-        - AttributeName: account_id
+        - AttributeName: pk
           KeyType: HASH
-        - AttributeName: ts
+        - AttributeName: sk
           KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   ReportBucket:
     Type: AWS::S3::Bucket
@@ -96,6 +115,14 @@ Resources:
         IgnorePublicAcls: true
         BlockPublicPolicy: true
         RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: retain-mini-cspm
+            Status: Enabled
+            ExpirationInDays: !Ref RetainDaysS3
+            Transitions:
+              - StorageClass: GLACIER
+                TransitionInDays: 90
 
   MiniCSPMFunction:
     Type: AWS::Serverless::Function

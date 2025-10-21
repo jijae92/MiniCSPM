@@ -21,6 +21,7 @@ MiniCSPM은 AWS 계정을 대상으로 CIS AWS Foundations Benchmark v1.5의 핵
    python -m minicspm.cli scan --format csv --out out/mini-cspm.csv
    ```
    - 선택 실행: `python -m minicspm.cli scan --includes "CIS-1.1,CIS-4.1"`
+   - v5.0 벤치마크 실행: `python -m minicspm.cli scan --cis v5_0 --format csv --out out/v5.csv`
 3. 결과 확인:
    - `out/mini-cspm.csv`에 10개 통제의 PASS/FAIL/WARN 내역이 저장됩니다.
    - JSON 보고서가 필요하다면 `--format json --out out/mini-cspm.json`을 사용합니다.
@@ -35,6 +36,11 @@ MiniCSPM은 AWS 계정을 대상으로 CIS AWS Foundations Benchmark v1.5의 핵
 - `EVENT_SOURCE`/`EVENT_DETAIL_TYPE`: 커스텀 이벤트 메타데이터.
 - `AUTO_REMEDIATE_APPLY`: `true`일 때만 안전 자동시정 적용을 허용(SSM 토글과 함께 필요).
 - `REMEDIATION_APPLY_PARAMETER`: SSM Parameter Store 토글 이름(값이 `true`/`on` 등일 때만 적용 실행).
+- `UNAUTH_MODE`: `logs`(기존 CloudWatch 필터) 또는 `lake`(CloudTrail/Security Lake SQL) 선택.
+- `UNAUTH_WINDOW_DAYS`: 최근 조회 시간 범위(기본 7일).
+- `UNAUTH_EXCLUDE_SERVICES`: 쉼표 분리 제외 서비스 패턴.
+- `UNAUTH_RESULT_THRESHOLD`: 허용할 실패 건수(초과 시 FAIL).
+- `MAX_CONCURRENCY` / `API_BACKOFF`: 교차 계정·리전 병렬 처리와 API 재시도 대기.
 
 필수 권한은 최소권한 원칙으로 아래 표를 참고하세요.
 
@@ -85,6 +91,25 @@ flowchart LR
   - `HIGH` 심각도의 FAIL이 1개 이상 발견
   - 가중 점수(`weighted`)가 `SCORE_THRESHOLD` 미만
   해당 이벤트에 SNS, Slack Lambda 등을 구독시켜 보안팀 알림 채널과 연동할 수 있습니다.
+
+
+## 예외 관리
+MiniCSPM은 루트의 `.minicspm-allow.json` 파일로 오탐을 관리합니다.
+```json
+[
+  {
+    "control_id": "CIS-1.1",
+    "resource_id": "123456789012",
+    "reason": "작업 승인 대기",
+    "owner": "security-team",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "expiresAt": "2025-03-01T00:00:00Z"
+  }
+]
+```
+- 만료 이전에는 해당 통제가 `waived=true`로 표시되고 보고서/HTML 하단 "예외 표"에 요약됩니다.
+- 만료된 항목이 남아 있으면 CI(`scripts/check_allowlist.py`) 단계에서 실패합니다.
+- 예외는 점검 결과 요약(`summary.WAIVED`)과 CSV/HTML/보안허브 내보내기에 함께 기록됩니다.
 
 ## 보안 및 컴플라이언스
 - **시크릿 금지**: AWS 자격 증명, 토큰, 키는 Git에 포함하지 말고 AWS SSO 또는 환경 변수/Secrets Manager를 활용하세요.

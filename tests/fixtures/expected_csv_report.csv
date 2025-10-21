@@ -1,2 +1,2 @@
-timestamp,account_id,control_id,title,severity,status,resource_ids,notes
-2024-01-01T00:00:00+00:00,123456789012,CIS-1.1,Root account MFA enabled,HIGH,FAIL,123456789012,"{""mfa_enabled"": false}"
+finding_id,title,cis,service,severity,status,resource_ids,remediable,remediation_action,checked_at,waived
+CIS-1.1,Root account MFA enabled,1.1,iam,HIGH,FAIL,123456789012,no,,2024-01-01T00:00:00+00:00,no

@@ -26,11 +26,13 @@ def render_html(result: ExecutionResult, settings: Settings) -> str:
         _Card("Pass", str(summary.PASS), "Checks passing"),
         _Card("Fail", str(summary.FAIL), "Checks failing"),
         _Card("Warn", str(summary.WARN), "Checks warning"),
+        _Card("Waived", str(getattr(summary, "WAIVED", 0)), "Allowlisted findings"),
     ]
-    sparkline = _build_sparkline([summary.PASS, summary.WARN, summary.FAIL])
+    sparkline = _build_sparkline([summary.PASS, summary.WARN, summary.FAIL, getattr(summary, "WAIVED", 0)])
     top_failures = _top_failures(result.findings)
     remediation_summary = _collect_remediation_summary(result.findings)
     findings_table = _build_findings_table(result.findings)
+    waived_table = _build_waived_table(result.findings)
 
     cards_html = "\n".join(
         f"""
@@ -206,6 +208,10 @@ def render_html(result: ExecutionResult, settings: Settings) -> str:
       <h2>All Findings</h2>
       {findings_table}
     </section>
+    <section>
+      <h2>Exception Allowlist</h2>
+      {waived_table}
+    </section>
   </body>
 </html>
 """
@@ -252,9 +258,10 @@ def _build_sparkline(values: Sequence[int]) -> str:
         y = height - (value / max_value) * (height - 10) - 5
         points.append(f"{x:.2f},{y:.2f}")
     points_str = " ".join(points)
-    labels = ["PASS", "WARN", "FAIL"]
+    labels = ["PASS", "WARN", "FAIL", "WAIVED"]
     label_spans = "".join(
         f'<span>{label}: {values[idx] if idx < len(values) else 0}</span>' for idx, label in enumerate(labels)
+        if idx < len(values)
     )
     return f"""
       <svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" aria-hidden="true">
@@ -298,6 +305,44 @@ def _build_findings_table(findings: Sequence[Finding]) -> str:
           <th>Status</th>
           <th>Resources</th>
           <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {''.join(rows)}
+      </tbody>
+    </table>
+    """
+
+
+def _build_waived_table(findings: Sequence[Finding]) -> str:
+    waived = [f for f in findings if getattr(f, "waived", False)]
+    if not waived:
+        return "<p>No active exceptions.</p>"
+
+    rows = []
+    for finding in waived:
+        waiver = getattr(finding, "waiver", {}) or {}
+        rows.append(
+            f"""
+            <tr>
+              <td>{html.escape(finding.id)}</td>
+              <td>{html.escape(", ".join(finding.resource_ids))}</td>
+              <td>{html.escape(waiver.get("reason", ""))}</td>
+              <td>{html.escape(waiver.get("owner", ""))}</td>
+              <td>{html.escape(waiver.get("expiresAt", ""))}</td>
+            </tr>
+            """
+        )
+
+    return f"""
+    <table>
+      <thead>
+        <tr>
+          <th>Control</th>
+          <th>Resources</th>
+          <th>Reason</th>
+          <th>Owner</th>
+          <th>Expires</th>
         </tr>
       </thead>
       <tbody>
