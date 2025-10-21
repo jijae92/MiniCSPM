@@ -1,0 +1,2 @@
+timestamp,account_id,control_id,title,severity,status,resource_ids,notes
+2024-01-01T00:00:00+00:00,123456789012,CIS-1.1,Root account MFA enabled,HIGH,FAIL,123456789012,"{""mfa_enabled"": false}"
